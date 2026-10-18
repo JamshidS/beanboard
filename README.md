@@ -2,6 +2,30 @@
 
 Beanboard is a small demo app where people browse specialty coffee beans, leave tasting reviews, and see a leaderboard of the best-rated beans.
 
+It's the sandbox for **[aiset](https://github.com/JamshidS/aiset)**: three services, two databases and a UI, small enough to read in an afternoon and real enough for an AI team to find genuine bugs in.
+
+## Try aiset on it
+
+You need Docker, Python 3.9+, Git and [Claude Code](https://claude.com/claude-code).
+
+```bash
+git clone https://github.com/JamshidS/beanboard && cd beanboard
+docker compose up --build -d                 # the app, on http://localhost:8080
+pipx install aiset-cli                       # or: pip install aiset-cli
+aiset-init . --team beanboard                # generates a PM, 4 engineers, QA and an integration checker
+beanboard-pm                                 # talk to the PM
+```
+
+In a second terminal, run `aiset` and open http://127.0.0.1:8765 to watch the team.
+
+Things to ask the PM:
+
+1. *"Build the knowledge briefs."* Every engineer documents their service.
+2. *"Can you do a quick bug analysis?"* The team reviews the services in parallel and reports ranked findings.
+3. *"Let users sort the reviews."* A feature across UI and API, with clarifying questions first.
+
+`main` is the untouched starting point, bugs included. The [`aiset-run`](https://github.com/JamshidS/beanboard/compare/main...aiset-run) branch has what the aiset team changed during the [recorded demo](https://github.com/JamshidS/aiset#a-real-run-start-to-finish): bean checks across services, upstream error handling, review sorting, and 26 new tests.
+
 ## Architecture
 
 ```
