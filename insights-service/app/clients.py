@@ -1,4 +1,5 @@
 import httpx
+from pydantic import ValidationError
 
 from app import config
 from app.schemas import Bean, BeanStats, Review
@@ -13,8 +14,13 @@ class UpstreamError(Exception):
 
 
 class _BaseClient:
-    def __init__(self, base_url: str, timeout: float = config.REQUEST_TIMEOUT):
-        self._http = httpx.Client(base_url=base_url, timeout=timeout)
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = config.REQUEST_TIMEOUT,
+        transport: httpx.BaseTransport | None = None,
+    ):
+        self._http = httpx.Client(base_url=base_url, timeout=timeout, transport=transport)
 
     def _get(self, path: str):
         try:
@@ -27,29 +33,48 @@ class _BaseClient:
             raise UpstreamError(
                 f"{self._http.base_url} answered {response.status_code} for {path}"
             )
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise UpstreamError(f"{self._http.base_url} returned invalid JSON for {path}") from exc
+
+    def _parse(self, path: str, parse):
+        """GET path and build models via parse(body); bad payloads become UpstreamError."""
+        body = self._get(path)
+        try:
+            return parse(body)
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise UpstreamError(
+                f"{self._http.base_url} returned an unexpected payload for {path}"
+            ) from exc
 
 
 class CatalogClient(_BaseClient):
-    def __init__(self, base_url: str | None = None):
-        super().__init__(base_url or config.CATALOG_SERVICE_URL)
+    def __init__(
+        self, base_url: str | None = None, transport: httpx.BaseTransport | None = None
+    ):
+        super().__init__(base_url or config.CATALOG_SERVICE_URL, transport=transport)
 
     def list_beans(self) -> list[Bean]:
-        return [Bean(**item) for item in self._get("/api/catalog/beans")]
+        return self._parse("/api/catalog/beans", lambda b: [Bean(**i) for i in b])
 
     def get_bean(self, bean_id: int) -> Bean:
-        return Bean(**self._get(f"/api/catalog/beans/{bean_id}"))
+        return self._parse(f"/api/catalog/beans/{bean_id}", lambda b: Bean(**b))
 
 
 class ReviewsClient(_BaseClient):
-    def __init__(self, base_url: str | None = None):
-        super().__init__(base_url or config.REVIEWS_SERVICE_URL)
+    def __init__(
+        self, base_url: str | None = None, transport: httpx.BaseTransport | None = None
+    ):
+        super().__init__(base_url or config.REVIEWS_SERVICE_URL, transport=transport)
 
     def list_reviews(self, bean_id: int) -> list[Review]:
-        return [Review(**item) for item in self._get(f"/api/reviews/beans/{bean_id}")]
+        return self._parse(
+            f"/api/reviews/beans/{bean_id}", lambda b: [Review(**i) for i in b]
+        )
 
     def stats(self) -> list[BeanStats]:
-        return [BeanStats(**item) for item in self._get("/api/reviews/stats")]
+        return self._parse("/api/reviews/stats", lambda b: [BeanStats(**i) for i in b])
 
 
 _catalog_client = CatalogClient()

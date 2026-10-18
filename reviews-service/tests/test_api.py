@@ -2,8 +2,20 @@ import mongomock
 import pytest
 from fastapi.testclient import TestClient
 
+from app.catalog import UpstreamError, get_catalog_client
 from app.db import get_collection, seed
 from app.main import app
+
+
+class FakeCatalog:
+    def __init__(self, exists=True, error=None):
+        self.exists, self.error, self.calls = exists, error, []
+
+    def bean_exists(self, bean_id):
+        self.calls.append(bean_id)
+        if self.error:
+            raise self.error
+        return self.exists
 
 
 @pytest.fixture()
@@ -14,6 +26,7 @@ def collection():
 @pytest.fixture()
 def client(collection):
     app.dependency_overrides[get_collection] = lambda: collection
+    app.dependency_overrides[get_catalog_client] = lambda: FakeCatalog()
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -86,3 +99,42 @@ def test_seed_populates_empty_collection_once(collection):
     assert collection.count_documents({"bean_id": 6}) == 0
     seed(collection)
     assert collection.count_documents({}) == count
+
+
+def with_catalog(fake):
+    app.dependency_overrides[get_catalog_client] = lambda: fake
+    return fake
+
+
+def test_create_review_stores_for_existing_bean(client, collection):
+    fake = with_catalog(FakeCatalog(exists=True))
+    response = post_review(client, 7)
+    assert response.status_code == 201
+    assert fake.calls == [7]
+    assert collection.count_documents({"bean_id": 7}) == 1
+
+
+def test_create_review_unknown_bean_404(client, collection):
+    with_catalog(FakeCatalog(exists=False))
+    response = post_review(client, 7)
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Bean not found"}
+    assert collection.count_documents({}) == 0
+
+
+def test_create_review_catalog_error_502(client, collection):
+    with_catalog(FakeCatalog(error=UpstreamError("catalog:8000 refused, internal detail")))
+    response = post_review(client, 7)
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Catalog service unavailable, please try again later"
+    }
+    assert "internal detail" not in response.text
+    assert collection.count_documents({}) == 0
+
+
+def test_invalid_body_422_without_catalog_call(client, collection):
+    fake = with_catalog(FakeCatalog())
+    assert post_review(client, 7, rating=9).status_code == 422
+    assert fake.calls == []
+    assert collection.count_documents({}) == 0

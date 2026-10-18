@@ -9,3 +9,6 @@ CORS_ORIGINS = [
     ).split(",")
     if origin.strip()
 ]
+
+CATALOG_SERVICE_URL = os.getenv("CATALOG_SERVICE_URL", "http://localhost:8001").rstrip("/")
+REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "5"))

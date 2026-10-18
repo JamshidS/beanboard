@@ -8,13 +8,15 @@ Beanboard is a small demo app where people browse specialty coffee beans, leave 
 browser --> ui (React + nginx, :8080)
                 |
                 +--> insights (:8003) --+--> catalog (:8001) --> PostgreSQL
-                |                       |
+                |                       |        ^
                 +-----------------------+--> reviews (:8002) --> MongoDB
+                                                |
+                                                +--> catalog (bean check on POST)
 ```
 
 - **ui** calls insights for the leaderboard and bean summaries, and catalog and reviews directly for everything else (nginx proxies `/api/catalog`, `/api/reviews`, `/api/insights`).
 - **catalog-service** owns the beans, stored in PostgreSQL.
-- **reviews-service** owns the reviews, stored in MongoDB.
+- **reviews-service** owns the reviews, stored in MongoDB. Before storing a new review it calls catalog-service over HTTP to check that the bean exists.
 - **insights-service** has no database; it calls catalog and reviews over HTTP to build the leaderboard and bean summaries.
 
 ## Run it
@@ -34,7 +36,7 @@ Both databases are seeded with sample beans and reviews on first start.
 
 ## Local development
 
-Start the databases with Docker, then run each service on its host port:
+Start the databases with Docker, then run each service on its host port. Posting a review needs catalog-service running on port 8001, because reviews-service checks the bean there first:
 
 ```bash
 docker compose up postgres mongo
@@ -68,7 +70,7 @@ Defaults for every setting are listed in `.env.example`.
 | POST | `/api/catalog/beans` | catalog | Create a bean |
 | PATCH | `/api/catalog/beans/{bean_id}` | catalog | Partially update a bean |
 | GET | `/api/reviews/beans/{bean_id}` | reviews | List a bean's reviews, newest first |
-| POST | `/api/reviews/beans/{bean_id}` | reviews | Add a review |
+| POST | `/api/reviews/beans/{bean_id}` | reviews | Add a review (201; 404 if the bean does not exist; 502 if catalog-service is unavailable; 422 invalid body) |
 | DELETE | `/api/reviews/{review_id}` | reviews | Delete a review |
 | GET | `/api/reviews/stats` | reviews | Average rating and review count per reviewed bean |
 | GET | `/api/insights/leaderboard` | insights | Beans ranked by average rating (`limit` 1..20, default 5) |

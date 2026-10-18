@@ -47,8 +47,12 @@ services:
     environment:
       MONGO_URL: mongodb://mongo:27017
       MONGO_DB: reviews
+      CATALOG_SERVICE_URL: http://catalog-service:8000
+      REQUEST_TIMEOUT: "5"
     depends_on:
       mongo:
+        condition: service_healthy
+      catalog-service:
         condition: service_healthy
     ports:
       - "8002:8000"
@@ -63,6 +67,7 @@ services:
     environment:
       CATALOG_SERVICE_URL: http://catalog-service:8000
       REVIEWS_SERVICE_URL: http://reviews-service:8000
+      REQUEST_TIMEOUT: "5"
     depends_on:
       catalog-service:
         condition: service_healthy

@@ -22,6 +22,10 @@ def leaderboard(
     try:
         beans = catalog.list_beans()
         stats = {s.bean_id: s for s in reviews.stats()}
+    except NotFoundError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Upstream resource not found: {exc}"
+        ) from exc
     except UpstreamError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

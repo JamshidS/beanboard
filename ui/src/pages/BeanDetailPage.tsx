@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { deleteReview, getBeanSummary, listReviews, updateBean } from "../api";
 import type { BeanSummary, Review } from "../types";
@@ -6,6 +6,7 @@ import RatingStars from "../components/RatingStars";
 import ReviewForm from "../components/ReviewForm";
 import ReviewList from "../components/ReviewList";
 import RoastBadge from "../components/RoastBadge";
+import { REVIEW_SORT_OPTIONS, ReviewSortKey, sortReviews } from "../components/sortReviews";
 import { formatPrice, splitNotes } from "../components/format";
 
 export default function BeanDetailPage() {
@@ -15,6 +16,8 @@ export default function BeanDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [price, setPrice] = useState("");
+  const [sortKey, setSortKey] = useState<ReviewSortKey>("newest");
+  const sortedReviews = useMemo(() => sortReviews(reviews, sortKey), [reviews, sortKey]);
 
   const load = useCallback(async () => {
     try {
@@ -138,8 +141,22 @@ export default function BeanDetailPage() {
 
       <div className="detail-cols">
         <section>
-          <h2>Reviews</h2>
-          <ReviewList reviews={reviews} onDelete={remove} />
+          <div className="toolbar">
+            <h2>Reviews</h2>
+            {reviews.length > 0 && (
+              <label className="sort-control">
+                Sort by
+                <select value={sortKey} onChange={(e) => setSortKey(e.target.value as ReviewSortKey)}>
+                  {REVIEW_SORT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          <ReviewList reviews={sortedReviews} onDelete={remove} />
         </section>
         <section>
           <ReviewForm beanId={beanId} onCreated={load} />

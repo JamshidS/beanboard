@@ -1,9 +1,17 @@
 from datetime import datetime, timezone
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.clients import NotFoundError, UpstreamError, get_catalog_client, get_reviews_client
+from app.clients import (
+    CatalogClient,
+    NotFoundError,
+    ReviewsClient,
+    UpstreamError,
+    get_catalog_client,
+    get_reviews_client,
+)
 from app.main import app
 from app.schemas import Bean, BeanStats, Review
 
@@ -25,11 +33,14 @@ def make_review(index: int, bean_id: int, rating: int) -> Review:
 
 
 class FakeCatalog:
-    def __init__(self, beans=None, fail=False):
+    def __init__(self, beans=None, fail=False, missing=False):
         self.beans = beans or []
         self.fail = fail
+        self.missing = missing
 
     def list_beans(self):
+        if self.missing:
+            raise NotFoundError("/api/catalog/beans")
         if self.fail:
             raise UpstreamError("catalog down")
         return self.beans
@@ -44,10 +55,11 @@ class FakeCatalog:
 
 
 class FakeReviews:
-    def __init__(self, reviews=None, stats=None, fail=False):
+    def __init__(self, reviews=None, stats=None, fail=False, missing=False):
         self.reviews = reviews or []
         self._stats = stats or []
         self.fail = fail
+        self.missing = missing
 
     def list_reviews(self, bean_id):
         if self.fail:
@@ -55,6 +67,8 @@ class FakeReviews:
         return [r for r in self.reviews if r.bean_id == bean_id]
 
     def stats(self):
+        if self.missing:
+            raise NotFoundError("/api/reviews/stats")
         if self.fail:
             raise UpstreamError("reviews down")
         return self._stats
@@ -127,3 +141,38 @@ def test_upstream_unreachable_returns_502(use_fakes):
     assert client.get("/api/insights/leaderboard").status_code == 502
     client = use_fakes(FakeCatalog(fail=True), FakeReviews())
     assert client.get("/api/insights/beans/1").status_code == 502
+
+
+def test_leaderboard_upstream_not_found_returns_502(use_fakes):
+    client = use_fakes(FakeCatalog(missing=True), FakeReviews())
+    response = client.get("/api/insights/leaderboard")
+    assert response.status_code == 502
+    assert "detail" in response.json()
+    client = use_fakes(FakeCatalog([make_bean(1, "A")]), FakeReviews(missing=True))
+    response = client.get("/api/insights/leaderboard")
+    assert response.status_code == 502
+    assert "detail" in response.json()
+
+
+def test_malformed_upstream_body_returns_502(use_fakes):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/api/catalog"):
+            return httpx.Response(200, text="<html>not json</html>")
+        return httpx.Response(200, json=[{"bean_id": "x"}])
+
+    transport = httpx.MockTransport(handler)
+    catalog = CatalogClient("http://catalog", transport=transport)
+    reviews = ReviewsClient("http://reviews", transport=transport)
+    client = use_fakes(catalog, reviews)
+    assert client.get("/api/insights/leaderboard").status_code == 502
+    assert client.get("/api/insights/beans/1").status_code == 502
+    # catalog fine, reviews payload has wrong shape
+    good = make_bean(1, "A").model_dump(mode="json")
+    transport2 = httpx.MockTransport(
+        lambda r: httpx.Response(200, json=[good] if r.url.path.endswith("beans") else [{"bean_id": "x"}])
+    )
+    client = use_fakes(
+        CatalogClient("http://catalog", transport=transport2),
+        ReviewsClient("http://reviews", transport=transport2),
+    )
+    assert client.get("/api/insights/leaderboard").status_code == 502

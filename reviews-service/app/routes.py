@@ -6,6 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pymongo import DESCENDING
 from pymongo.collection import Collection
 
+from app.catalog import (
+    CATALOG_UNAVAILABLE_DETAIL,
+    CatalogClient,
+    UpstreamError,
+    get_catalog_client,
+)
 from app.db import get_collection
 from app.schemas import BeanStats, Review, ReviewCreate
 
@@ -47,7 +53,16 @@ def create_review(
     bean_id: int,
     payload: ReviewCreate,
     collection: Collection = Depends(get_collection),
+    catalog: CatalogClient = Depends(get_catalog_client),
 ):
+    # Runs only after the body validated (422 otherwise), so no upstream call then.
+    try:
+        exists = catalog.bean_exists(bean_id)
+    except UpstreamError as exc:
+        # The cause is logged by app.catalog; the client gets a fixed message.
+        raise HTTPException(status_code=502, detail=CATALOG_UNAVAILABLE_DETAIL) from exc
+    if not exists:
+        raise HTTPException(status_code=404, detail="Bean not found")
     doc = {
         "bean_id": bean_id,
         **payload.model_dump(),
