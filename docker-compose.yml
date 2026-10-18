@@ -1,0 +1,93 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: beanboard
+      POSTGRES_PASSWORD: beanboard
+      POSTGRES_DB: catalog
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beanboard -d catalog"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongodata:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  catalog-service:
+    build: ./catalog-service
+    environment:
+      DATABASE_URL: postgresql+psycopg2://beanboard:beanboard@postgres:5432/catalog
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  reviews-service:
+    build: ./reviews-service
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: reviews
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8002:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  insights-service:
+    build: ./insights-service
+    environment:
+      CATALOG_SERVICE_URL: http://catalog-service:8000
+      REVIEWS_SERVICE_URL: http://reviews-service:8000
+    depends_on:
+      catalog-service:
+        condition: service_healthy
+      reviews-service:
+        condition: service_healthy
+    ports:
+      - "8003:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ui:
+    build: ./ui
+    depends_on:
+      catalog-service:
+        condition: service_healthy
+      reviews-service:
+        condition: service_healthy
+      insights-service:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
+  mongodata:
